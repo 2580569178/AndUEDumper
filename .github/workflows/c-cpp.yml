@@ -44,23 +44,26 @@ jobs:
           cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .
         fi
     
-    # 运行 clang-tidy
+    # 运行 clang-tidy - 修正条件判断
     - name: Run clang-tidy
-      if: hash('compile_commands.json') != ''
+      if: ${{ success() }}  # 只有在之前的步骤成功时才运行
       run: |
-        find . -name "*.cpp" -o -name "*.c" -o -name "*.cc" -o -name "*.cxx" | \
-          xargs -I {} clang-tidy {} --warnings-as-errors=* -checks='*' \
-          -- -I. -std=c++17 2>&1 | tee clang-tidy-report.txt
-    
+        # 检查 compile_commands.json 是否存在
+        if [ -f "compile_commands.json" ]; then
+          echo "Running clang-tidy..."
+          find . -name "*.cpp" -o -name "*.c" -o -name "*.cc" -o -name "*.cxx" | \
+            xargs -I {} clang-tidy {} --warnings-as-errors=* -checks='*' \
+            -- -I. -std=c++17 2>&1 | tee clang-tidy-report.txt
+        else
+          echo "compile_commands.json not found, skipping clang-tidy."
+        fi
+  
   build-and-test:
     strategy:
       matrix:
         build-type: [Debug, Release]
         compiler: [gcc, clang]
         os: [ubuntu-latest]
-        exclude:
-          - build-type: Debug
-            compiler: gcc  # 可选排除某些组合
     
     runs-on: ${{ matrix.os }}
     
