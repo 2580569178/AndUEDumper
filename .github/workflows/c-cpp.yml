@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: C/C++ Build and Package
 
 on:
   push:
@@ -13,11 +13,73 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
-    
-    - name: Configure
-      run: ./configure || echo "No configure script found, skipping"
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential make
     
     - name: Build
-      run: make || echo "Build failed or no Makefile found"
+      run: |
+        # 尝试使用 make
+        if [ -f "Makefile" ]; then
+          make
+        # 如果项目有简单的构建脚本
+        elif [ -f "build.sh" ]; then
+          chmod +x build.sh
+          ./build.sh
+        # 如果是简单的 gcc 编译
+        elif [ -f "main.c" ]; then
+          gcc main.c -o myapp
+        fi
+    
+    - name: Find and list executables
+      id: find_exe
+      run: |
+        # 查找所有可执行文件
+        EXECUTABLES=$(find . -type f -executable ! -path "./.git/*" ! -name "*.so" ! -name "*.dylib")
+        if [ -n "$EXECUTABLES" ]; then
+          echo "Found executables:"
+          echo "$EXECUTABLES"
+          # 创建一个包含所有可执行文件的列表
+          echo "exe_list<<EOF" >> $GITHUB_OUTPUT
+          echo "$EXECUTABLES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "No executables found"
+          echo "exe_list=none" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Upload specific executables
+      if: steps.find_exe.outputs.exe_list != 'none'
+      uses: actions/upload-artifact@v4
+      with:
+        name: executables
+        path: |
+          ./myapp
+          ./main
+          ./app
+          ./program
+          ./test
+          ./build/app
+        if-no-files-found: warn
+    
+    - name: Create packaged release
+      if: success()
+      run: |
+        # 创建一个包含所有构建产物的目录
+        mkdir -p release
+        # 复制可执行文件
+        find . -maxdepth 1 -type f -executable -exec cp {} release/ \;
+        # 复制库文件
+        find . -name "*.so" -o -name "*.a" | xargs -I {} cp {} release/ 2>/dev/null || true
+        # 创建压缩包
+        tar -czf release.tar.gz release/
+        # 显示压缩包内容
+        tar -tzf release.tar.gz
+    
+    - name: Upload release package
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-package
+        path: release.tar.gz
+        retention-days: 90
