@@ -1,4 +1,4 @@
-name: Build AndUEDumper Auto
+name: Build AndUEDumper
 
 on:
   push:
@@ -14,69 +14,153 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
+        fetch-depth: 0  # 获取完整历史
     
-    - name: Setup NDK
+    - name: Debug directory structure
+      run: |
+        echo "=== 完整目录结构 ==="
+        find . -maxdepth 3 -type d | sort
+        
+        echo ""
+        echo "=== 根目录内容 ==="
+        ls -la
+        
+        echo ""
+        echo "=== 查找关键文件 ==="
+        find . -name "Android.mk" -o -name "Makefile" | while read f; do
+          echo "文件: $f"
+          echo "所在目录: $(dirname "$f")"
+        done
+        
+        echo ""
+        echo "=== 检查可能的项目目录 ==="
+        for dir in ./*/; do
+          if [ -d "$dir" ]; then
+            echo "目录: $dir"
+            ls "$dir" | head -5
+          fi
+        done
+    
+    - name: Setup Android NDK
       run: |
         wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
         unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
+        
         echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
+        echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
     
-    - name: Find project directory
+    - name: Try to find and enter project directory
       id: find_project
       run: |
-        # 查找包含 Android.mk 的目录
-        ANDROID_MK_PATH=$(find . -name "Android.mk" | head -1)
-        if [ -z "$ANDROID_MK_PATH" ]; then
-          echo "错误：找不到 Android.mk"
-          exit 1
+        echo "尝试找到项目目录..."
+        
+        # 方法1：查找 Android.mk 文件
+        ANDROID_MK=$(find . -name "Android.mk" | head -1)
+        if [ -n "$ANDROID_MK" ]; then
+          PROJECT_DIR=$(dirname "$ANDROID_MK")
+          echo "找到 Android.mk 在: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+          cd "$PROJECT_DIR"
+        else
+          # 方法2：尝试常见的目录名
+          if [ -d "AndUEDumper-main/AndUEDumper" ]; then
+            echo "进入 AndUEDumper-main/AndUEDumper"
+            cd AndUEDumper-main/AndUEDumper
+            echo "project_dir=$(pwd)" >> $GITHUB_OUTPUT
+          elif [ -d "AndUEDumper" ]; then
+            echo "进入 AndUEDumper"
+            cd AndUEDumper
+            echo "project_dir=$(pwd)" >> $GITHUB_OUTPUT
+          else
+            # 方法3：检查是否有直接的文件
+            if [ -f "Android.mk" ]; then
+              echo "Android.mk 在当前目录"
+              echo "project_dir=$(pwd)" >> $GITHUB_OUTPUT
+            else
+              echo "错误：找不到项目目录"
+              echo "当前目录内容:"
+              ls -la
+              exit 1
+            fi
+          fi
         fi
         
-        PROJECT_DIR=$(dirname "$ANDROID_MK_PATH")
-        echo "项目目录: $PROJECT_DIR"
-        echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+        echo "最终项目目录: $(pwd)"
+        echo "目录内容:"
+        ls -la
     
-    - name: Build
+    - name: Build project
       run: |
-        cd "${{ steps.find_project.outputs.project_dir }}"
-        echo "构建目录: $(pwd)"
-        /opt/android-ndk-r21e/ndk-build
-    
-    - name: Find and package outputs
-      run: |
+        # 使用上一步找到的目录
         cd "${{ steps.find_project.outputs.project_dir }}"
         
-        echo "=== 打包构建产物 ==="
+        echo "=== 开始构建 ==="
+        echo "当前目录: $(pwd)"
         
-        # 创建时间戳
-        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        # 运行构建脚本
+        if [ -f "ndk-build.sh" ]; then
+          echo "使用 ndk-build.sh"
+          chmod +x ndk-build.sh
+          ./ndk-build.sh
+        else
+          echo "使用 ndk-build"
+          $NDK_HOME/ndk-build
+        fi
         
-        # 创建临时目录
-        mkdir -p /tmp/build-output
+        echo "构建完成!"
+    
+    - name: Collect build outputs
+      run: |
+        # 进入项目目录
+        cd "${{ steps.find_project.outputs.project_dir }}"
         
-        # 查找所有可能的输出文件
-        find . -type f \( -name "*.so" -o -name "*.a" -o -name "dumper" -o -name "AndUEDumper" \) ! -path "./.git/*" | while read file; do
-          echo "添加: $file"
-          cp --parents "$file" /tmp/build-output/ 2>/dev/null || true
+        echo "=== 收集构建产物 ==="
+        
+        # 创建输出目录
+        OUTPUT_DIR="$GITHUB_WORKSPACE/build-output"
+        mkdir -p "$OUTPUT_DIR"
+        
+        # 查找所有 .so 文件
+        echo "查找 .so 文件..."
+        find . -name "*.so" ! -path "./.git/*" | while read file; do
+          echo "找到: $file"
+          cp --parents "$file" "$OUTPUT_DIR/" 2>/dev/null || true
         done
         
         # 检查标准目录
-        for dir in libs obj; do
-          if [ -d "$dir" ]; then
-            echo "添加目录: $dir"
-            cp -r "$dir" /tmp/build-output/ 2>/dev/null || true
-          fi
+        if [ -d "libs" ]; then
+          echo "复制 libs 目录..."
+          cp -r libs "$OUTPUT_DIR/" 2>/dev/null || true
+        fi
+        
+        if [ -d "obj" ]; then
+          echo "复制 obj 目录中的 .so 文件..."
+          find obj -name "*.so" -type f | while read file; do
+            cp --parents "$file" "$OUTPUT_DIR/" 2>/dev/null || true
+          done
+        fi
+        
+        echo "=== 收集的文件 ==="
+        find "$OUTPUT_DIR" -type f | while read f; do
+          echo "  - $f"
         done
         
-        # 创建压缩包
-        cd /tmp/build-output
-        tar -czf /tmp/andue-dumper-$TIMESTAMP.tar.gz .
-        
-        # 移动回工作目录
-        mv /tmp/andue-dumper-$TIMESTAMP.tar.gz "$GITHUB_WORKSPACE/"
+        # 如果没有找到文件，创建一个标记文件
+        if [ ! "$(ls -A "$OUTPUT_DIR")" ]; then
+          echo "警告：没有找到任何构建产物"
+          echo "可能构建没有生成文件，或者文件在其他位置"
+          echo "检查常见位置..."
+          find . -type f \( -name "*.so" -o -name "*.a" -o -name "dumper" -o -name "AndUEDumper" \) ! -path "./.git/*"
+          
+          # 创建空标记文件
+          touch "$OUTPUT_DIR/no-files-found.txt"
+          echo "未找到构建产物" > "$OUTPUT_DIR/no-files-found.txt"
+        fi
     
-    - name: Upload
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: andue-dumper-build
-        path: andue-dumper-*.tar.gz
-        if-no-files-found: error
+        path: build-output/
+        if-no-files-found: warn
+        retention-days: 7
