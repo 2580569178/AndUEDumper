@@ -2,15 +2,18 @@ name: Build AndUEDumper Executable
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
-  build-executable:
+  build:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
       with:
         submodules: recursive
     
@@ -26,68 +29,69 @@ jobs:
         if [ -d "AndUEDumper-main/AndUEDumper" ]; then
           cd AndUEDumper-main/AndUEDumper
         fi
-        echo "当前目录: $(pwd)"
+        echo "Current directory: $(pwd)"
     
     - name: Create executable-only Android.mk
       run: |
-        echo "创建只构建可执行文件的 Android.mk..."
+        echo "Creating executable-only Android.mk..."
         
-        # 备份原始文件
+        # Backup original file
         if [ -f "Android.mk" ]; then
           cp Android.mk Android.mk.backup
         fi
         
-        # 创建只包含 executable.mk 的 Android.mk
+        # Create Android.mk that only includes executable.mk
         cat > Android.mk << 'EOF'
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-# 只包含 executable.mk 来构建可执行文件
+# Only include executable.mk to build executable
 include $(LOCAL_PATH)/src/executable.mk
 EOF
         
-        echo "新的 Android.mk 内容:"
+        echo "New Android.mk content:"
         cat Android.mk
     
     - name: Build executable
       run: |
-        echo "开始构建可执行文件版本..."
+        echo "Building executable version..."
         $NDK_HOME/ndk-build clean
         $NDK_HOME/ndk-build
     
-    - name: Check build results
+    - name: Check for executable files
       run: |
-        echo "=== 检查生成的可执行文件 ==="
+        echo "=== Checking for executable files ==="
         
-        # 查找可执行文件
-        find . -type f \( -name "UEDump3r" -o -name "AndUEDumper" -o -name "dumper" \) ! -path "./.git/*" | while read f; do
-          echo "找到: $f"
+        # Look for executable files
+        echo "Searching for UEDump3r or similar executables..."
+        find . -type f -name "UEDump3r" ! -path "./.git/*" | while read f; do
+          echo "Found: $f"
           file "$f" || true
         done
         
-        # 检查 libs 目录
+        # Check libs directory
         if [ -d "libs" ]; then
           echo ""
-          echo "libs 目录内容:"
+          echo "Contents of libs directory:"
           find libs -type f | while read f; do
             echo "  $f"
           done
         fi
         
-        # 如果没找到，列出所有文件
+        # List all files if no libs directory
         if [ ! -d "libs" ]; then
           echo ""
-          echo "当前目录文件列表:"
+          echo "All files in current directory:"
           ls -la
         fi
     
-    - name: Upload artifacts
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: andue-dumper-executable
+        name: andue-dumper-build
         path: |
           libs/
-          obj/local/
+          obj/
         if-no-files-found: warn
         retention-days: 7
