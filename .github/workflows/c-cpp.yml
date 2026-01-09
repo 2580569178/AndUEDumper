@@ -1,4 +1,4 @@
-name: C/C++ Build with Make
+name: Build AndUEDumper
 
 on:
   push:
@@ -7,41 +7,87 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
     
-    - name: Install build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
     
-    - name: Run configure if exists
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+    
+    - name: Install Android NDK
       run: |
-        if [ -f "./configure" ]; then
-          chmod +x configure
-          ./configure
-        fi
+        # 安装 Android NDK
+        echo "y" | sudo ${ANDROID_HOME}/tools/bin/sdkmanager "ndk;25.1.8937393"
+        # 设置 NDK_HOME 环境变量
+        echo "NDK_HOME=${ANDROID_HOME}/ndk/25.1.8937393" >> $GITHUB_ENV
+        echo "PATH=${ANDROID_HOME}/ndk/25.1.8937393:$PATH" >> $GITHUB_ENV
     
-    - name: Build with make
-      run: make
-    
-    - name: Run tests if available
+    - name: Install make and other build tools
       run: |
-        if make -n check 2>/dev/null; then
-          make check
-        elif make -n test 2>/dev/null; then
-          make test
-        else
-          echo "No tests defined"
+        sudo apt-get update
+        sudo apt-get install -y make build-essential
+    
+    - name: Navigate to project directory
+      run: |
+        echo "当前目录:"
+        pwd
+        ls -la
+        echo "切换到 AndUEDumper/AndUEDumper 目录"
+        cd AndUEDumper/AndUEDumper || cd AndUEDumper
+        echo "当前目录:"
+        pwd
+        ls -la
+    
+    - name: Build the project
+      run: |
+        # 切换到正确的目录
+        if [ -d "AndUEDumper/AndUEDumper" ]; then
+          cd AndUEDumper/AndUEDumper
+        elif [ -d "AndUEDumper" ]; then
+          cd AndUEDumper
         fi
+        
+        echo "当前目录: $(pwd)"
+        echo "NDK_HOME: $NDK_HOME"
+        echo "PATH: $PATH"
+        
+        # 检查 NDK 是否安装成功
+        if [ -z "$NDK_HOME" ]; then
+          echo "错误: NDK_HOME 未设置"
+          exit 1
+        fi
+        
+        # 运行 make
+        make clean && make
+    
+    - name: List build output
+      run: |
+        # 查找构建输出
+        echo "查找构建输出文件..."
+        find . -type f -name "*.so" -o -name "*.a" -o -name "*.o" -o -name "dumper" -o -name "AndUEDumper" | while read file; do
+          echo "找到: $file"
+          file "$file" || true
+        done
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-output
+        name: android-build-output
         path: |
-          **/!(*.c|*.cpp|*.h|*.hpp|*.o)
-          !.git/
+          **/*.so
+          **/*.a
+          **/dumper
+          **/AndUEDumper
         if-no-files-found: warn
         retention-days: 7
