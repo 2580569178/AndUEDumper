@@ -1,0 +1,49 @@
+name: Analyze Project
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Analyze project structure
+      run: |
+        echo "=== 项目分析报告 ==="
+        echo ""
+        echo "1. 根目录文件："
+        ls -la
+        echo ""
+        echo "2. 构建系统检测："
+        if [ -f "Makefile" ]; then
+          echo "- 找到 Makefile"
+          echo "  默认目标："
+          grep "^[A-Za-z]" Makefile | grep -v "^#" | grep -v "^." | head -10
+        fi
+        if [ -f "CMakeLists.txt" ]; then
+          echo "- 找到 CMakeLists.txt"
+          echo "  项目名称："
+          grep "project(" CMakeLists.txt | head -3
+        fi
+        if [ -f "configure" ]; then
+          echo "- 找到 configure 脚本"
+        fi
+        echo ""
+        echo "3. 源文件统计："
+        echo "- C 文件: $(find . -name "*.c" | wc -l)"
+        echo "- C++ 文件: $(find . -name "*.cpp" | wc -l)"
+        echo "- 头文件: $(find . -name "*.h" -o -name "*.hpp" | wc -l)"
+        echo ""
+        echo "4. 建议的构建方式："
+        if [ -f "CMakeLists.txt" ]; then
+          echo "  使用 CMake 构建"
+        elif [ -f "Makefile" ]; then
+          echo "  使用 make 构建"
+        elif [ $(find . -name "*.c" -o -name "*.cpp" | wc -l) -gt 0 ]; then
+          echo "  直接编译源文件"
+        else
+          echo "  未检测到可构建的文件"
+        fi
