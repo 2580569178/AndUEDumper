@@ -16,70 +16,137 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential make
+        sudo apt-get install -y build-essential make gcc g++
     
     - name: Build
+      id: build
       run: |
-        # 尝试使用 make
+        # 首先，让我们看看项目结构
+        echo "=== 项目结构 ==="
+        find . -name "*.c" -o -name "*.cpp" -o -name "Makefile" -o -name "*.mk" | head -20
+        
+        # 尝试不同的构建方式
         if [ -f "Makefile" ]; then
+          echo "使用 Makefile 构建..."
           make
-        # 如果项目有简单的构建脚本
-        elif [ -f "build.sh" ]; then
-          chmod +x build.sh
-          ./build.sh
-        # 如果是简单的 gcc 编译
+          # 查看 make 生成了什么
+          echo "=== 构建后的文件 ==="
+          find . -type f -newer Makefile ! -path "./.git/*" | head -30
         elif [ -f "main.c" ]; then
+          echo "编译 main.c..."
           gcc main.c -o myapp
-        fi
-    
-    - name: Find and list executables
-      id: find_exe
-      run: |
-        # 查找所有可执行文件
-        EXECUTABLES=$(find . -type f -executable ! -path "./.git/*" ! -name "*.so" ! -name "*.dylib")
-        if [ -n "$EXECUTABLES" ]; then
-          echo "Found executables:"
-          echo "$EXECUTABLES"
-          # 创建一个包含所有可执行文件的列表
-          echo "exe_list<<EOF" >> $GITHUB_OUTPUT
-          echo "$EXECUTABLES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+        elif [ -f "main.cpp" ]; then
+          echo "编译 main.cpp..."
+          g++ main.cpp -o myapp
+        elif [ -f "src/main.c" ]; then
+          echo "编译 src/main.c..."
+          gcc src/main.c -o myapp
+        elif [ -f "src/main.cpp" ]; then
+          echo "编译 src/main.cpp..."
+          g++ src/main.cpp -o myapp
         else
-          echo "No executables found"
-          echo "exe_list=none" >> $GITHUB_OUTPUT
+          echo "没有找到可编译的文件，列出所有文件："
+          ls -la
+          # 尝试查找任何源文件
+          SOURCE_FILES=$(find . -name "*.c" -o -name "*.cpp" | head -5)
+          if [ -n "$SOURCE_FILES" ]; then
+            echo "找到源文件：$SOURCE_FILES"
+            for file in $SOURCE_FILES; do
+              echo "编译 $file..."
+              if [[ $file == *.c ]]; then
+                gcc "$file" -o "${file%.c}"
+              elif [[ $file == *.cpp ]]; then
+                g++ "$file" -o "${file%.cpp}"
+              fi
+            done
+          fi
         fi
     
-    - name: Upload specific executables
-      if: steps.find_exe.outputs.exe_list != 'none'
-      uses: actions/upload-artifact@v4
-      with:
-        name: executables
-        path: |
-          ./myapp
-          ./main
-          ./app
-          ./program
-          ./test
-          ./build/app
-        if-no-files-found: warn
-    
-    - name: Create packaged release
-      if: success()
+    - name: Find and list all files
       run: |
-        # 创建一个包含所有构建产物的目录
-        mkdir -p release
-        # 复制可执行文件
-        find . -maxdepth 1 -type f -executable -exec cp {} release/ \;
-        # 复制库文件
-        find . -name "*.so" -o -name "*.a" | xargs -I {} cp {} release/ 2>/dev/null || true
-        # 创建压缩包
-        tar -czf release.tar.gz release/
-        # 显示压缩包内容
-        tar -tzf release.tar.gz
+        echo "=== 当前目录所有文件 ==="
+        ls -la
+        
+        echo "=== 查找可执行文件 ==="
+        find . -type f -executable ! -path "./.git/*" | while read file; do
+          echo "可执行文件: $file (大小: $(stat -c%s "$file") bytes)"
+          file "$file"
+        done
+        
+        echo "=== 查找较大的二进制文件（可能包含可执行文件）==="
+        find . -type f -size +10k ! -path "./.git/*" | while read file; do
+          if file "$file" | grep -q "executable\|ELF\|Mach-O"; then
+            echo "可能是可执行文件: $file"
+          fi
+        done
     
-    - name: Upload release package
+    - name: Upload all executables
       uses: actions/upload-artifact@v4
       with:
-        name: release-package
-        path: release.tar.gz
-        retention-days: 90
+        name: all-executables
+        path: |
+          **/*
+          !.git/
+          !**/*.c
+          !**/*.cpp
+          !**/*.h
+          !**/*.hpp
+          !**/*.o
+        if-no-files-found: ignore
+        retention-days: 7
+    
+    - name: Upload only specific file types
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: |
+          **/myapp
+          **/main
+          **/app
+          **/test*
+          **/program*
+          **/*.exe
+          **/*.out
+          **/*.bin
+        if-no-files-found: ignore
+        retention-days: 7
+    
+    - name: Create and upload everything as archive
+      run: |
+        # 创建时间戳
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        
+        # 创建一个干净的构建目录
+        mkdir -p build-output
+        
+        # 复制所有文件（排除 git 和源文件）
+        echo "正在收集文件..."
+        find . -type f ! -path "./.git/*" ! -name "*.c" ! -name "*.cpp" ! -name "*.h" ! -name "*.hpp" ! -name "*.o" ! -name "*.a" | head -100 | while read file; do
+          # 检查文件类型，只复制二进制文件
+          if file "$file" | grep -q "executable\|ELF\|Mach-O\|archive\|shared object"; then
+            echo "复制: $file"
+            cp "$file" build-output/
+          fi
+        done
+        
+        # 如果没有找到任何文件，至少复制一些构建产物
+        if [ ! "$(ls -A build-output)" ]; then
+          echo "没有找到二进制文件，复制所有非源文件..."
+          find . -type f ! -path "./.git/*" ! -name "*.c" ! -name "*.cpp" ! -name "*.h" ! -name "*.hpp" | head -50 | while read file; do
+            echo "复制: $file"
+            cp "$file" build-output/
+          done
+        fi
+        
+        # 创建压缩包
+        tar -czf build-artifacts-$TIMESTAMP.tar.gz build-output/
+        
+        echo "=== 压缩包内容 ==="
+        tar -tzf build-artifacts-$TIMESTAMP.tar.gz | head -20
+    
+    - name: Upload archive
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-archive
+        path: build-artifacts-*.tar.gz
+        retention-days: 30
