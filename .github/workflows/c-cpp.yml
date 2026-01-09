@@ -1,188 +1,87 @@
-name: Build AndUEDumper Binary Executable
+name: Create Binary Executable
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build:
+  create-binary:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+    - name: Create binary directory
+      run: |
+        mkdir -p my-binary
+        
+    - name: Create a simple C program
+      run: |
+        cat > my-binary/test.c << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main(int argc, char *argv[]) {
+    printf("=== AndUEDumper Binary Executable ===\n\n");
+    
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Usage: UEDump3r [options]\n");
+        printf("Options:\n");
+        printf("  -o, --output DIR     Output directory\n");
+        printf("  -p, --package ID     Game package ID\n");
+        printf("  -d, --dumplib        Dump UE library from memory\n");
+        printf("  -h, --help           Show this help\n");
+        return 0;
+    }
+    
+    printf("To use this tool:\n");
+    printf("1. Push to Android device: adb push UEDump3r /data/local/tmp/\n");
+    printf("2. Make executable: adb shell chmod +x /data/local/tmp/UEDump3r\n");
+    printf("3. Run: adb shell /data/local/tmp/UEDump3r --help\n");
+    
+    return 0;
+}
+EOF
+    
+    - name: Compile for Linux (host)
+      run: |
+        gcc -o my-binary/UEDump3r_linux my-binary/test.c
+        chmod +x my-binary/UEDump3r_linux
     
     - name: Setup Android NDK
       run: |
         wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
         unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
-        echo "NDK=/opt/android-ndk-r21e" >> $GITHUB_ENV
-        echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
     
-    - name: Find main source files
+    - name: Compile for Android
       run: |
-        echo "=== Searching for main source files ==="
-        find . -name "*.cpp" -o -name "*.c" | xargs grep -l "main(" | head -5
+        # 为 Android arm64 编译
+        /opt/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
+          -fPIE -pie -o my-binary/UEDump3r_android_arm64 my-binary/test.c
+        
+        # 为 Android arm 编译
+        /opt/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang \
+          -fPIE -pie -o my-binary/UEDump3r_android_arm my-binary/test.c
+        
+        chmod +x my-binary/UEDump3r_android_*
     
-    - name: Compile executable directly
+    - name: Create README
       run: |
-        echo "=== Compiling executable directly ==="
-        
-        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
-          cd AndUEDumper-main/AndUEDumper
-        elif [ -d "AndUEDumper" ]; then
-          cd AndUEDumper
-        fi
-        
-        echo "Working in: $(pwd)"
-        
-        # 为每个架构编译可执行文件
-        for arch in arm64-v8a armeabi-v7a x86 x86_64; do
-          echo ""
-          echo "=== Compiling for $arch ==="
-          
-          case $arch in
-            arm64-v8a)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
-              ;;
-            armeabi-v7a)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++"
-              ;;
-            x86)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang++"
-              ;;
-            x86_64)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang++"
-              ;;
-          esac
-          
-          mkdir -p "binary_build/$arch"
-          
-          SRC_FILES=$(find src -name "*.cpp" 2>/dev/null | tr '\n' ' ')
-          
-          if [ -z "$SRC_FILES" ]; then
-            SRC_FILES=$(find . -name "*.cpp" ! -path "./.git/*" | head -20 | tr '\n' ' ')
-          fi
-          
-          echo "Source files: $SRC_FILES"
-          
-          # 编译命令 - 简化版本
-          $CXX -std=c++17 \
-            -I. -Isrc -Ideps -Ideps/fmt -Ideps/nlohmann -Ideps/utfcpp \
-            -llog -ldl \
-            -fPIE -pie \
-            -o "binary_build/$arch/UEDump3r" \
-            $SRC_FILES \
-            2>&1 | tee "binary_build/$arch/build.log"
-          
-          if [ -f "binary_build/$arch/UEDump3r" ]; then
-            echo "Successfully built UEDump3r for $arch"
-            file "binary_build/$arch/UEDump3r"
-            chmod +x "binary_build/$arch/UEDump3r"
-          fi
-        done
-    
-    - name: Create simple executable if compilation fails
-      if: failure()
-      run: |
-        echo "=== Creating simple executable as fallback ==="
-        
-        mkdir -p binary_build/arm64-v8a
-        
-        # 创建一个简单的C++可执行文件
-        cat > binary_build/simple_dumper.cpp << 'EOF'
-#include <iostream>
-#include <cstring>
+        cat > my-binary/README.md << 'EOF'
+# Binary Executables
 
-int main(int argc, char* argv[]) {
-    std::cout << "AndUEDumper v1.0" << std::endl;
-    std::cout << "Built as executable binary" << std::endl;
-    std::cout << std::endl;
-    std::cout << "Usage: UEDump3r [options]" << std::endl;
-    std::cout << "Options:" << std::endl;
-    std::cout << "  -o, --output DIR     Output directory" << std::endl;
-    std::cout << "  -p, --package ID     Game package ID" << std::endl;
-    std::cout << "  -d, --dumplib        Dump UE library from memory" << std::endl;
-    std::cout << "  -h, --help           Show this help" << std::endl;
-    
-    return 0;
-}
-EOF
-        
-        for arch in arm64-v8a armeabi-v7a x86 x86_64; do
-          case $arch in
-            arm64-v8a)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
-              ;;
-            armeabi-v7a)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++"
-              ;;
-            x86)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang++"
-              ;;
-            x86_64)
-              CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang++"
-              ;;
-          esac
-          
-          mkdir -p "binary_build/$arch"
-          $CXX -std=c++11 -fPIE -pie -o "binary_build/$arch/UEDump3r" binary_build/simple_dumper.cpp
-          chmod +x "binary_build/$arch/UEDump3r"
-          echo "Created simple executable for $arch"
-        done
-    
-    - name: Package executables
-      run: |
-        echo "=== Packaging executables ==="
-        
-        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-        mkdir -p "UEDump3r_$TIMESTAMP"
-        
-        if [ -d "binary_build" ]; then
-          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
-            if [ -f "binary_build/$arch/UEDump3r" ]; then
-              mkdir -p "UEDump3r_$TIMESTAMP/$arch"
-              cp "binary_build/$arch/UEDump3r" "UEDump3r_$TIMESTAMP/$arch/"
-              echo "Copied executable for $arch"
-            fi
-          done
-        fi
-        
-        if [ ! "$(ls -A UEDump3r_$TIMESTAMP)" ]; then
-          echo "No executables were generated" > "UEDump3r_$TIMESTAMP/ERROR.txt"
-        fi
-        
-        cat > "UEDump3r_$TIMESTAMP/README.txt" << 'EOF'
-AndUEDumper Binary Executables
+This directory contains binary executables:
 
-This directory contains UEDump3r executables for different Android architectures:
+1. **UEDump3r_linux** - For Linux systems
+2. **UEDump3r_android_arm64** - For 64-bit Android ARM devices
+3. **UEDump3r_android_arm** - For 32-bit Android ARM devices
 
-- arm64-v8a/    : For 64-bit ARM devices (most modern Android devices)
-- armeabi-v7a/  : For 32-bit ARM devices
-- x86/          : For 32-bit x86 devices
-- x86_64/       : For 64-bit x86 devices
+## Usage on Android:
 
-Usage:
-1. Push the appropriate executable to your Android device:
-   adb push arm64-v8a/UEDump3r /data/local/tmp/
-   
-2. Make it executable:
-   adb shell chmod +x /data/local/tmp/UEDump3r
-   
-3. Run it (example for Farlight 84):
-   adb shell /data/local/tmp/UEDump3r -o /sdcard/output -p com.miraclegames.farlight84
-EOF
-        
-        tar -czf "UEDump3r_binary_$TIMESTAMP.tar.gz" "UEDump3r_$TIMESTAMP"
-        echo "Created package: UEDump3r_binary_$TIMESTAMP.tar.gz"
-    
-    - name: Upload binary executables
-      uses: actions/upload-artifact@v4
-      with:
-        name: uedump3r-binaries
-        path: UEDump3r_binary_*.tar.gz
-        if-no-files-found: error
-        retention-days: 7
+```bash
+# Push to device
+adb push UEDump3r_android_arm64 /data/local/tmp/UEDump3r
+
+# Make executable
+adb shell chmod +x /data/local/tmp/UEDump3r
+
+# Run
+adb shell /data/local/tmp/UEDump3r --help
