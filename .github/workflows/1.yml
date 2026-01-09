@@ -1,7 +1,9 @@
-name: Build AndUEDumper Simple
+name: Build AndUEDumper Executable
 
 on:
   push:
+    branches: [ "main", "master" ]
+  pull_request:
     branches: [ "main", "master" ]
 
 jobs:
@@ -13,33 +15,230 @@ jobs:
       with:
         submodules: recursive
     
-    - name: Setup NDK
+    - name: Setup Android NDK
       run: |
-        # 安装 NDK
-        wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
-        unzip android-ndk-r21e-linux-x86_64.zip -d /opt/
-        echo "NDK=/opt/android-ndk-r21e" >> $GITHUB_ENV
+        wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+        unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
+        
+        echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
         echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
     
-    - name: Build
+    - name: Install required tools
       run: |
-        # 进入项目目录
-        cd AndUEDumper/AndUEDumper
-        
-        # 运行项目自带的构建脚本
-        if [ -f "ndk-build.sh" ]; then
-            chmod +x ndk-build.sh
-            ./ndk-build.sh
+        sudo apt-get update
+        sudo apt-get install -y \
+          make \
+          build-essential \
+          clang \
+          g++ \
+          python3 \
+          file
+    
+    - name: Navigate to project directory
+      run: |
+        # 根据您的目录结构，进入正确的目录
+        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
+          cd AndUEDumper-main/AndUEDumper
         else
-            # 或者直接运行 ndk-build
-            /opt/android-ndk-r21e/ndk-build
+          # 查找包含 Android.mk 的目录
+          MK_DIR=$(dirname $(find . -name "Android.mk" | head -1))
+          cd "$MK_DIR"
+        fi
+        
+        echo "项目目录: $(pwd)"
+        echo "文件列表:"
+        ls -la
+    
+    - name: Build executable version
+      run: |
+        echo "=== 构建可执行文件版本 ==="
+        echo "当前目录: $(pwd)"
+        
+        # 查看 Android.mk 文件，了解如何构建可执行文件
+        echo "检查 Android.mk 内容..."
+        if grep -q "BUILD_EXECUTABLE" Android.mk; then
+          echo "Android.mk 已经配置为构建可执行文件"
+        else
+          echo "Android.mk 可能配置为构建共享库"
+          echo "修改 Android.mk 以构建可执行文件..."
+          
+          # 备份原始文件
+          cp Android.mk Android.mk.backup
+          
+          # 将 BUILD_SHARED_LIBRARY 改为 BUILD_EXECUTABLE
+          sed -i 's/BUILD_SHARED_LIBRARY/BUILD_EXECUTABLE/g' Android.mk
+          
+          # 修改模块名称（从 libshared_UEDump3r 改为 UEDump3r）
+          sed -i 's/LOCAL_MODULE := shared_UEDump3r/LOCAL_MODULE := UEDump3r/g' Android.mk
+          
+          echo "修改后的 Android.mk 预览:"
+          grep -A5 -B5 "BUILD_EXECUTABLE\|LOCAL_MODULE" Android.mk | head -20
+        fi
+        
+        # 清理并构建
+        echo "开始构建可执行文件..."
+        $NDK_HOME/ndk-build clean
+        $NDK_HOME/ndk-build
+        
+        # 恢复原始文件（如果需要再次构建共享库）
+        if [ -f "Android.mk.backup" ]; then
+          mv Android.mk.backup Android.mk
         fi
     
-    - name: Upload
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-output
-        path: |
-          AndUEDumper/AndUEDumper/libs/
-          AndUEDumper/AndUEDumper/obj/local/*/*.so
-        if-no-files-found: warn
+    - name: Check for executable files
+      run: |
+        echo "=== 查找可执行文件 ==="
+        
+        # 查找可执行文件（没有 .so 扩展名的可执行文件）
+        find . -type f -executable ! -name "*.so" ! -name "*.sh" ! -name "*.bat" ! -path "./.git/*" | while read f; do
+          echo "可执行文件: $f"
+          file "$f" || true
+          echo "大小: $(stat -c%s "$f") 字节"
+          echo ""
+        done
+        
+        # 检查 libs 目录
+        if [ -d "libs" ]; then
+          echo "libs 目录内容:"
+          for arch in libs/*; do
+            if [ -d "$arch" ]; then
+              echo "  $arch:"
+              find "$arch" -type f -executable | while read f; do
+                echo "    - $(basename "$f")"
+              done
+            fi
+          done
+        fi
+        
+        # 如果没有找到 UEDump3r，尝试重命名现有文件
+        if [ ! -f "libs/arm64-v8a/UEDump3r" ] && [ -f "libs/arm64-v8a/libshared_UEDump3r_arm64.so" ]; then
+          echo "重命名共享库为可执行文件（仅用于测试）..."
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            if [ -f "libs/$arch/libshared_UEDump3r_$arch.so" ]; then
+              cp "libs/$arch/libshared_UEDump3r_$arch.so" "libs/$arch/UEDump3r_$arch"
+              chmod +x "libs/$arch/UEDump3r_$arch"
+              echo "创建: libs/$arch/UEDump3r_$arch"
+            fi
+          done
+        fi
+    
+    - name: Create executable wrapper scripts
+      run: |
+        echo "=== 创建可执行文件包装脚本 ==="
+        
+        # 为每个架构创建运行脚本
+        for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+          if [ -d "libs/$arch" ]; then
+            # 查找该架构下的可执行文件
+            EXE_FILE=$(find "libs/$arch" -type f -executable ! -name "*.so" | head -1)
+            
+            if [ -n "$EXE_FILE" ]; then
+              cat > "run_${arch}.sh" << EOF
+#!/bin/bash
+# AndUEDumper 运行脚本 - ${arch} 架构
+# 使用方法: ./run_${arch}.sh [参数]
+
+# 设置环境变量
+export LD_LIBRARY_PATH="\$(dirname \$0)/libs/${arch}:\$LD_LIBRARY_PATH"
+
+# 执行可执行文件
+echo "运行 AndUEDumper (${arch})..."
+echo "参数: \$@"
+
+# 检查可执行文件是否存在
+if [ -f "$(basename "$EXE_FILE")" ]; then
+  ./$(basename "$EXE_FILE") "\$@"
+elif [ -f "libs/${arch}/$(basename "$EXE_FILE")" ]; then
+  ./libs/${arch}/$(basename "$EXE_FILE") "\$@"
+else
+  echo "错误: 找不到可执行文件"
+  ls -la "libs/${arch}/"
+fi
+EOF
+              
+              chmod +x "run_${arch}.sh"
+              echo "创建脚本: run_${arch}.sh"
+            fi
+          fi
+        done
+        
+        # 创建通用运行脚本
+        cat > run_ue_dumper.sh << 'EOF'
+#!/bin/bash
+# AndUEDumper 通用运行脚本
+# 自动检测设备架构并运行对应的版本
+
+# 用法示例:
+# ./run_ue_dumper.sh -o /sdcard/Android/data/com.miraclegames.farlight84/files -p com.miraclegames.farlight84
+
+# 获取设备架构
+get_arch() {
+    if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+        echo "arm64-v8a"
+    elif [ "$(uname -m)" = "armv7l" ]; then
+        echo "armeabi-v7a"
+    elif [ "$(uname -m)" = "i686" ]; then
+        echo "x86"
+    elif [ "$(uname -m)" = "x86_64" ]; then
+        echo "x86_64"
+    else
+        echo "未知架构"
+    fi
+}
+
+ARCH=$(get_arch)
+echo "检测到架构: $ARCH"
+
+# 设置库路径
+export LD_LIBRARY_PATH="$(dirname $0)/libs/$ARCH:$LD_LIBRARY_PATH"
+
+# 查找可执行文件
+if [ -f "libs/$ARCH/UEDump3r" ]; then
+    EXECUTABLE="libs/$ARCH/UEDump3r"
+elif [ -f "libs/$ARCH/UEDump3r_$ARCH" ]; then
+    EXECUTABLE="libs/$ARCH/UEDump3r_$ARCH"
+elif [ -f "libs/$ARCH/libshared_UEDump3r_$ARCH.so" ]; then
+    # 如果是共享库，尝试直接使用（可能需要其他方式调用）
+    echo "注意: 找到的是共享库文件，可能需要不同的调用方式"
+    EXECUTABLE="libs/$ARCH/libshared_UEDump3r_$ARCH.so"
+else
+    echo "错误: 找不到 $ARCH 架构的可执行文件"
+    echo "可用文件:"
+    ls -la "libs/$ARCH/" 2>/dev/null || echo "libs/$ARCH/ 目录不存在"
+    exit 1
+fi
+
+echo "使用可执行文件: $EXECUTABLE"
+
+# 传递所有参数
+"$EXECUTABLE" "$@"
+EOF
+        
+        chmod +x run_ue_dumper.sh
+        
+        # 创建使用说明
+        cat > README_EXECUTABLE.md << 'EOF'
+# AndUEDumper 可执行文件使用说明
+
+## 文件说明
+
+- `libs/` - 包含各架构的可执行文件
+  - `arm64-v8a/` - 64位 ARM 架构
+  - `armeabi-v7a/` - 32位 ARM 架构  
+  - `x86/` - 32位 x86 架构
+  - `x86_64/` - 64位 x86 架构
+- `run_*.sh` - 各架构的运行脚本
+- `run_ue_dumper.sh` - 自动检测架构的通用脚本
+
+## 使用方法
+
+### 方法1: 直接使用可执行文件
+```bash
+# 推送到 Android 设备
+adb push libs/arm64-v8a/UEDump3r /data/local/tmp/
+
+# 在设备上执行
+adb shell
+cd /data/local/tmp
+chmod +x UEDump3r
+./UEDump3r -o /sdcard/output -p com.miraclegames.farlight84
