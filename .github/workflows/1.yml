@@ -1,9 +1,7 @@
-name: Build AndUEDumper
+name: Build AndUEDumper (NDK only)
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
     branches: [ "main" ]
 
 jobs:
@@ -11,70 +9,56 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
     
-    - name: Install Android NDK manually
+    - name: Download and extract Android NDK
       run: |
-        # 手动下载和安装 Android NDK
+        # 直接下载 NDK，不通过 SDK
         wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-        unzip android-ndk-r25c-linux.zip -d /opt
+        unzip android-ndk-r25c-linux.zip -d /opt/
+        
+        # 设置环境变量
         echo "NDK_HOME=/opt/android-ndk-r25c" >> $GITHUB_ENV
         echo "PATH=/opt/android-ndk-r25c:$PATH" >> $GITHUB_ENV
+        
+        echo "NDK_HOME 设置为: $NDK_HOME"
+        ls -la /opt/android-ndk-r25c/
     
-    - name: Install required tools
+    - name: Install build tools
       run: |
         sudo apt-get update
         sudo apt-get install -y make build-essential clang
     
-    - name: Navigate to project directory
+    - name: Navigate and build
       run: |
-        # 切换到项目目录
+        # 进入项目目录
         if [ -d "AndUEDumper/AndUEDumper" ]; then
           cd AndUEDumper/AndUEDumper
         elif [ -d "AndUEDumper" ]; then
           cd AndUEDumper
         fi
         
-        echo "当前目录: $(pwd)"
-        echo "NDK_HOME: $NDK_HOME"
-        ls -la
-    
-    - name: Build project
-      run: |
-        # 确保在正确的目录
         echo "构建目录: $(pwd)"
+        echo "NDK_HOME: $NDK_HOME"
         
-        # 检查 Makefile 是否存在
-        if [ ! -f "Makefile" ]; then
-          echo "错误: 在当前目录找不到 Makefile"
-          find ../ -name "Makefile" | head -5
-          exit 1
+        # 显示 Makefile 内容，看看它期望什么
+        echo "=== Makefile 内容 ==="
+        if [ -f "Makefile" ]; then
+          head -50 Makefile
         fi
         
-        # 显示 Makefile 内容
-        echo "Makefile 内容:"
-        head -50 Makefile
-        
-        # 运行 make
-        echo "运行 make clean..."
-        make clean || echo "make clean 失败，继续..."
-        
-        echo "运行 make..."
-        make
+        # 尝试构建
+        echo "=== 开始构建 ==="
+        make clean && make
     
-    - name: Upload build results
-      if: success()
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: andue-dumper-build
+        name: build-output
         path: |
           **/*.so
           **/*.a
-          **/dumper
-          **/AndUEDumper
-          **/*.out
-          **/*.bin
+          **/!(*.c|*.cpp|*.h|*.hpp|*.o|Makefile|*.mk)
         if-no-files-found: warn
