@@ -1,4 +1,4 @@
-name: C/C++ Build with CMake
+name: C/C++ Build with Make
 
 on:
   push:
@@ -13,37 +13,35 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install CMake and tools
+    - name: Install build tools
+      run: sudo apt-get update && sudo apt-get install -y build-essential
+    
+    - name: Run configure if exists
       run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake build-essential
+        if [ -f "./configure" ]; then
+          chmod +x configure
+          ./configure
+        fi
     
-    - name: Create build directory
-      run: mkdir -p build
+    - name: Build with make
+      run: make
     
-    - name: Configure with CMake
-      working-directory: ./build
-      run: cmake ..
-    
-    - name: Build
-      working-directory: ./build
-      run: cmake --build . --config Release
-    
-    - name: Run tests
-      working-directory: ./build
+    - name: Run tests if available
       run: |
-        if ctest --version 2>/dev/null; then
-          ctest --output-on-failure
+        if make -n check 2>/dev/null; then
+          make check
+        elif make -n test 2>/dev/null; then
+          make test
         else
-          echo "CTest not available"
+          echo "No tests defined"
         fi
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: cmake-build
+        name: build-output
         path: |
-          build/**
-          !build/CMakeFiles/
+          **/!(*.c|*.cpp|*.h|*.hpp|*.o)
+          !.git/
         if-no-files-found: warn
         retention-days: 7
