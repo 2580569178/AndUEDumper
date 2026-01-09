@@ -2,9 +2,9 @@ name: Build AndUEDumper
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
 
 jobs:
   build:
@@ -14,149 +14,91 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
+        path: AndUEDumper
     
-    - name: Download Android NDK r21e
+    - name: Setup Android NDK
       run: |
-        wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+        # 下载并安装 Android NDK r21e
+        wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
         unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
         
         echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
-        echo "PATH=/opt/android-ndk-r21e:/opt/android-ndk-r21e/build:$PATH" >> $GITHUB_ENV
+        echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
         
-        # 检查 ndk-build
-        echo "ndk-build 位置:"
-        ls -la /opt/android-ndk-r21e/ndk-build
+        echo "NDK installed at: /opt/android-ndk-r21e"
     
-    - name: Install build tools
+    - name: Install required tools
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           make \
           build-essential \
           clang \
-          gcc \
           g++ \
+          python3 \
           file
     
-    - name: Check project structure
+    - name: Navigate to project directory
       run: |
-        echo "=== 检查项目结构 ==="
-        
-        # 进入项目目录
-        if [ -d "AndUEDumper/AndUEDumper" ]; then
-          cd AndUEDumper/AndUEDumper
-        elif [ -d "AndUEDumper" ]; then
-          cd AndUEDumper
-        fi
-        
+        cd AndUEDumper/AndUEDumper
         echo "当前目录: $(pwd)"
         echo "文件列表:"
         ls -la
         
-        echo "=== 查找 Android.mk 和 Application.mk ==="
-        find . -name "Android.mk" -o -name "Application.mk" | while read f; do
-          echo "找到: $f"
-          echo "内容预览:"
-          head -20 "$f"
-          echo ""
-        done
+        echo "=== 查看构建脚本 ==="
+        echo "Makefile 内容:"
+        head -50 Makefile
         
-        echo "=== 查找所有 Makefile ==="
-        find . -name "Makefile" -o -name "*.mk" | head -10
+        echo "=== 查看 Android.mk ==="
+        head -50 Android.mk
+        
+        echo "=== 查看 Application.mk ==="
+        head -50 Application.mk
     
-    - name: Set up NDK environment
+    - name: Run ndk-build.sh
       run: |
-        # 进入项目目录
-        if [ -d "AndUEDumper/AndUEDumper" ]; then
-          cd AndUEDumper/AndUEDumper
-        elif [ -d "AndUEDumper" ]; then
-          cd AndUEDumper
-        fi
+        cd AndUEDumper/AndUEDumper
         
-        echo "当前目录: $(pwd)"
+        echo "运行 ndk-build.sh..."
+        chmod +x ndk-build.sh
+        ./ndk-build.sh
         
-        # 设置 NDK_PROJECT_PATH 为当前目录
-        echo "NDK_PROJECT_PATH=$(pwd)" >> $GITHUB_ENV
-        
-        # 检查是否设置了正确的路径
-        echo "环境变量:"
-        echo "NDK_HOME=$NDK_HOME"
-        echo "NDK_PROJECT_PATH=$NDK_PROJECT_PATH"
-        echo "PATH=$PATH"
-    
-    - name: Build with ndk-build
-      run: |
-        # 进入项目目录
-        if [ -d "AndUEDumper/AndUEDumper" ]; then
-          cd AndUEDumper/AndUEDumper
-        elif [ -d "AndUEDumper" ]; then
-          cd AndUEDumper
-        fi
-        
-        echo "构建目录: $(pwd)"
-        echo "NDK_PROJECT_PATH: $NDK_PROJECT_PATH"
-        
-        # 确保 NDK_PROJECT_PATH 设置正确
-        if [ -z "$NDK_PROJECT_PATH" ]; then
-          export NDK_PROJECT_PATH=$(pwd)
-          echo "设置 NDK_PROJECT_PATH 为: $NDK_PROJECT_PATH"
-        fi
-        
-        # 检查 Android.mk 是否存在
-        if [ ! -f "Android.mk" ]; then
-          echo "错误: 在当前目录找不到 Android.mk"
-          echo "查找 Android.mk:"
-          find . -name "Android.mk" | head -5
-          exit 1
-        fi
-        
-        echo "Android.mk 存在，开始构建..."
-        
-        # 运行 ndk-build
-        $NDK_HOME/ndk-build clean
-        $NDK_HOME/ndk-build
-        
-        # 如果上面的命令失败，尝试不同的调用方式
+        # 检查是否构建成功
         if [ $? -ne 0 ]; then
-          echo "标准 ndk-build 失败，尝试其他方式..."
-          
-          # 方法1: 指定 NDK_PROJECT_PATH 参数
-          $NDK_HOME/ndk-build NDK_PROJECT_PATH=$(pwd)
-          
-          # 方法2: 使用 -C 选项
-          if [ $? -ne 0 ]; then
-            $NDK_HOME/ndk-build -C $(pwd)
-          fi
+          echo "ndk-build.sh 失败，尝试直接 ndk-build..."
+          # 如果脚本失败，尝试直接调用 ndk-build
+          $NDK_HOME/ndk-build
         fi
     
-    - name: Find and list build outputs
+    - name: Check build outputs
       run: |
-        echo "=== 查找构建产物 ==="
+        cd AndUEDumper/AndUEDumper
         
-        # 检查常见的 NDK 输出目录
-        echo "检查 libs/ 目录:"
+        echo "=== 检查构建输出 ==="
+        
+        # 查看 libs 目录
         if [ -d "libs" ]; then
+          echo "libs 目录内容:"
           find libs -type f | while read f; do
-            echo "文件: $f"
-            file "$f" || true
+            echo "  - $f (大小: $(stat -c%s "$f") bytes)"
+            file "$f" 2>/dev/null || true
+          done
+        else
+          echo "libs 目录不存在"
+        fi
+        
+        # 查看 obj 目录
+        if [ -d "obj" ]; then
+          echo "obj 目录中的 .so 文件:"
+          find obj -name "*.so" -type f | while read f; do
+            echo "  - $f"
           done
         fi
         
-        echo "检查 obj/ 目录:"
-        if [ -d "obj" ]; then
-          find obj -type f -name "*.so" | head -10
-        fi
-        
-        echo "检查当前目录的共享库:"
+        # 查找所有可能的输出文件
+        echo "查找所有 .so 文件:"
         find . -name "*.so" ! -path "./.git/*" | while read f; do
-          echo "共享库: $f"
-          file "$f" || true
-        done
-        
-        echo "查找所有构建产物:"
-        find . -type f \( -name "*.so" -o -name "*.a" -o -name "dumper" -o -name "AndUEDumper" \) ! -path "./.git/*" | while read f; do
-          echo "产物: $f"
-          ls -la "$f"
+          echo "  - $f"
         done
     
     - name: Upload build artifacts
@@ -164,10 +106,7 @@ jobs:
       with:
         name: andue-dumper-build
         path: |
-          **/libs/
-          **/*.so
-          **/*.a
-          **/dumper
-          **/AndUEDumper
+          AndUEDumper/AndUEDumper/libs/
+          AndUEDumper/AndUEDumper/obj/local/
         if-no-files-found: warn
         retention-days: 7
