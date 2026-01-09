@@ -1,4 +1,4 @@
-name: C/C++ Build and Package
+name: C/C++ Build Debug
 
 on:
   push:
@@ -7,146 +7,124 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-debug:
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install dependencies
+    - name: Display system info
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential make gcc g++
+        echo "=== 系统信息 ==="
+        uname -a
+        echo "GCC 版本:"
+        gcc --version || echo "GCC 未安装"
+        echo "G++ 版本:"
+        g++ --version || echo "G++ 未安装"
+        echo "Make 版本:"
+        make --version || echo "Make 未安装"
+        echo "CMake 版本:"
+        cmake --version || echo "CMake 未安装"
     
-    - name: Build
-      id: build
+    - name: List project files
       run: |
-        # 首先，让我们看看项目结构
-        echo "=== 项目结构 ==="
-        find . -name "*.c" -o -name "*.cpp" -o -name "Makefile" -o -name "*.mk" | head -20
-        
-        # 尝试不同的构建方式
-        if [ -f "Makefile" ]; then
-          echo "使用 Makefile 构建..."
-          make
-          # 查看 make 生成了什么
-          echo "=== 构建后的文件 ==="
-          find . -type f -newer Makefile ! -path "./.git/*" | head -30
-        elif [ -f "main.c" ]; then
-          echo "编译 main.c..."
-          gcc main.c -o myapp
-        elif [ -f "main.cpp" ]; then
-          echo "编译 main.cpp..."
-          g++ main.cpp -o myapp
-        elif [ -f "src/main.c" ]; then
-          echo "编译 src/main.c..."
-          gcc src/main.c -o myapp
-        elif [ -f "src/main.cpp" ]; then
-          echo "编译 src/main.cpp..."
-          g++ src/main.cpp -o myapp
-        else
-          echo "没有找到可编译的文件，列出所有文件："
-          ls -la
-          # 尝试查找任何源文件
-          SOURCE_FILES=$(find . -name "*.c" -o -name "*.cpp" | head -5)
-          if [ -n "$SOURCE_FILES" ]; then
-            echo "找到源文件：$SOURCE_FILES"
-            for file in $SOURCE_FILES; do
-              echo "编译 $file..."
-              if [[ $file == *.c ]]; then
-                gcc "$file" -o "${file%.c}"
-              elif [[ $file == *.cpp ]]; then
-                g++ "$file" -o "${file%.cpp}"
-              fi
-            done
+        echo "=== 项目文件结构 ==="
+        find . -type f -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "Makefile" -o -name "makefile" -o -name "CMakeLists.txt" | head -50
+        echo "=== 根目录文件 ==="
+        ls -la
+    
+    - name: Check for common build files
+      run: |
+        echo "=== 检查构建文件 ==="
+        for file in configure autogen.sh Makefile makefile CMakeLists.txt build.sh; do
+          if [ -f "$file" ]; then
+            echo "找到: $file"
           fi
+        done
+    
+    - name: Try autotools build
+      if: false  # 先禁用，后面手动启用
+      run: |
+        echo "尝试 autotools 构建..."
+        if [ -f "autogen.sh" ]; then
+          chmod +x autogen.sh
+          ./autogen.sh
+        fi
+        if [ -f "configure" ]; then
+          chmod +x configure
+          ./configure
+        fi
+        if [ -f "Makefile" ]; then
+          make
         fi
     
-    - name: Find and list all files
+    - name: Try simple make build
       run: |
-        echo "=== 当前目录所有文件 ==="
-        ls -la
-        
-        echo "=== 查找可执行文件 ==="
-        find . -type f -executable ! -path "./.git/*" | while read file; do
-          echo "可执行文件: $file (大小: $(stat -c%s "$file") bytes)"
-          file "$file"
-        done
-        
-        echo "=== 查找较大的二进制文件（可能包含可执行文件）==="
-        find . -type f -size +10k ! -path "./.git/*" | while read file; do
-          if file "$file" | grep -q "executable\|ELF\|Mach-O"; then
-            echo "可能是可执行文件: $file"
-          fi
-        done
+        echo "=== 尝试 make 构建 ==="
+        if [ -f "Makefile" ]; then
+          echo "找到 Makefile，内容预览:"
+          head -30 Makefile
+          echo "尝试 make..."
+          make
+        else
+          echo "没有找到 Makefile"
+        fi
     
-    - name: Upload all executables
-      uses: actions/upload-artifact@v4
-      with:
-        name: all-executables
-        path: |
-          **/*
-          !.git/
-          !**/*.c
-          !**/*.cpp
-          !**/*.h
-          !**/*.hpp
-          !**/*.o
-        if-no-files-found: ignore
-        retention-days: 7
-    
-    - name: Upload only specific file types
-      uses: actions/upload-artifact@v4
-      with:
-        name: binaries
-        path: |
-          **/myapp
-          **/main
-          **/app
-          **/test*
-          **/program*
-          **/*.exe
-          **/*.out
-          **/*.bin
-        if-no-files-found: ignore
-        retention-days: 7
-    
-    - name: Create and upload everything as archive
+    - name: Try CMake build
       run: |
-        # 创建时间戳
-        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-        
-        # 创建一个干净的构建目录
-        mkdir -p build-output
-        
-        # 复制所有文件（排除 git 和源文件）
-        echo "正在收集文件..."
-        find . -type f ! -path "./.git/*" ! -name "*.c" ! -name "*.cpp" ! -name "*.h" ! -name "*.hpp" ! -name "*.o" ! -name "*.a" | head -100 | while read file; do
-          # 检查文件类型，只复制二进制文件
-          if file "$file" | grep -q "executable\|ELF\|Mach-O\|archive\|shared object"; then
-            echo "复制: $file"
-            cp "$file" build-output/
-          fi
-        done
-        
-        # 如果没有找到任何文件，至少复制一些构建产物
-        if [ ! "$(ls -A build-output)" ]; then
-          echo "没有找到二进制文件，复制所有非源文件..."
-          find . -type f ! -path "./.git/*" ! -name "*.c" ! -name "*.cpp" ! -name "*.h" ! -name "*.hpp" | head -50 | while read file; do
-            echo "复制: $file"
-            cp "$file" build-output/
+        echo "=== 尝试 CMake 构建 ==="
+        if [ -f "CMakeLists.txt" ]; then
+          echo "找到 CMakeLists.txt，内容预览:"
+          head -30 CMakeLists.txt
+          mkdir -p build
+          cd build
+          cmake ..
+          make
+        else
+          echo "没有找到 CMakeLists.txt"
+        fi
+    
+    - name: Try direct compilation
+      run: |
+        echo "=== 尝试直接编译 ==="
+        # 查找主要的源文件
+        MAIN_FILES=$(find . -name "main.c" -o -name "main.cpp" -o -name "*main*.c" -o -name "*main*.cpp" | head -5)
+        if [ -n "$MAIN_FILES" ]; then
+          echo "找到可能的源文件: $MAIN_FILES"
+          for file in $MAIN_FILES; do
+            echo "编译 $file..."
+            if [[ $file == *.c ]]; then
+              gcc "$file" -o "${file%.c}.out" -lm
+            elif [[ $file == *.cpp ]]; then
+              g++ "$file" -o "${file%.cpp}.out"
+            fi
+          done
+        else
+          echo "没有找到明显的主源文件"
+          # 尝试编译所有 .c 文件
+          C_FILES=$(find . -name "*.c" | head -3)
+          for file in $C_FILES; do
+            echo "编译 C 文件: $file"
+            gcc "$file" -o "${file%.c}.out"
           done
         fi
-        
-        # 创建压缩包
-        tar -czf build-artifacts-$TIMESTAMP.tar.gz build-output/
-        
-        echo "=== 压缩包内容 ==="
-        tar -tzf build-artifacts-$TIMESTAMP.tar.gz | head -20
     
-    - name: Upload archive
+    - name: Check build results
+      run: |
+        echo "=== 构建结果 ==="
+        echo "当前目录: $(pwd)"
+        echo "文件列表:"
+        ls -la
+        echo "二进制文件:"
+        find . -type f -executable ! -path "./.git/*" 2>/dev/null || true
+    
+    - name: Upload debug info
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-archive
-        path: build-artifacts-*.tar.gz
-        retention-days: 30
+        name: debug-info
+        path: |
+          ./*
+          !.git
+        if-no-files-found: ignore
+        retention-days: 7
