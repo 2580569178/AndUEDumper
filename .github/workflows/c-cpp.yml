@@ -1,4 +1,4 @@
-name: C/C++ Build Debug
+name: C/C++ Build with CMake
 
 on:
   push:
@@ -7,124 +7,43 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-debug:
+  build:
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Display system info
+    - name: Install CMake and tools
       run: |
-        echo "=== 系统信息 ==="
-        uname -a
-        echo "GCC 版本:"
-        gcc --version || echo "GCC 未安装"
-        echo "G++ 版本:"
-        g++ --version || echo "G++ 未安装"
-        echo "Make 版本:"
-        make --version || echo "Make 未安装"
-        echo "CMake 版本:"
-        cmake --version || echo "CMake 未安装"
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
     
-    - name: List project files
-      run: |
-        echo "=== 项目文件结构 ==="
-        find . -type f -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "Makefile" -o -name "makefile" -o -name "CMakeLists.txt" | head -50
-        echo "=== 根目录文件 ==="
-        ls -la
+    - name: Create build directory
+      run: mkdir -p build
     
-    - name: Check for common build files
-      run: |
-        echo "=== 检查构建文件 ==="
-        for file in configure autogen.sh Makefile makefile CMakeLists.txt build.sh; do
-          if [ -f "$file" ]; then
-            echo "找到: $file"
-          fi
-        done
+    - name: Configure with CMake
+      working-directory: ./build
+      run: cmake ..
     
-    - name: Try autotools build
-      if: false  # 先禁用，后面手动启用
-      run: |
-        echo "尝试 autotools 构建..."
-        if [ -f "autogen.sh" ]; then
-          chmod +x autogen.sh
-          ./autogen.sh
-        fi
-        if [ -f "configure" ]; then
-          chmod +x configure
-          ./configure
-        fi
-        if [ -f "Makefile" ]; then
-          make
-        fi
+    - name: Build
+      working-directory: ./build
+      run: cmake --build . --config Release
     
-    - name: Try simple make build
+    - name: Run tests
+      working-directory: ./build
       run: |
-        echo "=== 尝试 make 构建 ==="
-        if [ -f "Makefile" ]; then
-          echo "找到 Makefile，内容预览:"
-          head -30 Makefile
-          echo "尝试 make..."
-          make
+        if ctest --version 2>/dev/null; then
+          ctest --output-on-failure
         else
-          echo "没有找到 Makefile"
+          echo "CTest not available"
         fi
     
-    - name: Try CMake build
-      run: |
-        echo "=== 尝试 CMake 构建 ==="
-        if [ -f "CMakeLists.txt" ]; then
-          echo "找到 CMakeLists.txt，内容预览:"
-          head -30 CMakeLists.txt
-          mkdir -p build
-          cd build
-          cmake ..
-          make
-        else
-          echo "没有找到 CMakeLists.txt"
-        fi
-    
-    - name: Try direct compilation
-      run: |
-        echo "=== 尝试直接编译 ==="
-        # 查找主要的源文件
-        MAIN_FILES=$(find . -name "main.c" -o -name "main.cpp" -o -name "*main*.c" -o -name "*main*.cpp" | head -5)
-        if [ -n "$MAIN_FILES" ]; then
-          echo "找到可能的源文件: $MAIN_FILES"
-          for file in $MAIN_FILES; do
-            echo "编译 $file..."
-            if [[ $file == *.c ]]; then
-              gcc "$file" -o "${file%.c}.out" -lm
-            elif [[ $file == *.cpp ]]; then
-              g++ "$file" -o "${file%.cpp}.out"
-            fi
-          done
-        else
-          echo "没有找到明显的主源文件"
-          # 尝试编译所有 .c 文件
-          C_FILES=$(find . -name "*.c" | head -3)
-          for file in $C_FILES; do
-            echo "编译 C 文件: $file"
-            gcc "$file" -o "${file%.c}.out"
-          done
-        fi
-    
-    - name: Check build results
-      run: |
-        echo "=== 构建结果 ==="
-        echo "当前目录: $(pwd)"
-        echo "文件列表:"
-        ls -la
-        echo "二进制文件:"
-        find . -type f -executable ! -path "./.git/*" 2>/dev/null || true
-    
-    - name: Upload debug info
-      if: always()
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: debug-info
+        name: cmake-build
         path: |
-          ./*
-          !.git
-        if-no-files-found: ignore
+          build/**
+          !build/CMakeFiles/
+        if-no-files-found: warn
         retention-days: 7
