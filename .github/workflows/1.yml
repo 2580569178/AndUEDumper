@@ -1,8 +1,8 @@
-name: Build AndUEDumper Direct
+name: Build AndUEDumper Simple
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
 
 jobs:
   build:
@@ -13,76 +13,33 @@ jobs:
       with:
         submodules: recursive
     
-    - name: Install tools
+    - name: Setup NDK
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          make \
-          gcc \
-          g++ \
-          clang \
-          android-sdk \
-          android-ndk
+        # 安装 NDK
+        wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+        unzip android-ndk-r21e-linux-x86_64.zip -d /opt/
+        echo "NDK=/opt/android-ndk-r21e" >> $GITHUB_ENV
+        echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
     
-    - name: Try to find and use system NDK
-      run: |
-        # 检查系统是否已安装 NDK
-        echo "查找系统 NDK..."
-        find /usr -name "ndk-build" 2>/dev/null | head -5
-        find /opt -name "ndk-build" 2>/dev/null | head -5
-        
-        # 尝试设置 NDK 环境变量
-        SYSTEM_NDK=$(find /usr -name "ndk-build" 2>/dev/null | head -1)
-        if [ -n "$SYSTEM_NDK" ]; then
-          NDK_HOME=$(dirname "$SYSTEM_NDK")
-          echo "NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
-          echo "PATH=$NDK_HOME:$PATH" >> $GITHUB_ENV
-          echo "使用系统 NDK: $NDK_HOME"
-        else
-          # 如果没有系统 NDK，安装一个
-          echo "安装 Android NDK..."
-          sudo apt-get install -y android-ndk
-          # 再次查找
-          SYSTEM_NDK=$(find /usr -name "ndk-build" 2>/dev/null | head -1)
-          if [ -n "$SYSTEM_NDK" ]; then
-            NDK_HOME=$(dirname "$SYSTEM_NDK")
-            echo "NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
-            echo "PATH=$NDK_HOME:$PATH" >> $GITHUB_ENV
-          fi
-        fi
-    
-    - name: Build the project
+    - name: Build
       run: |
         # 进入项目目录
-        cd AndUEDumper/AndUEDumper 2>/dev/null || cd AndUEDumper 2>/dev/null || echo "保持在根目录"
+        cd AndUEDumper/AndUEDumper
         
-        echo "当前目录: $(pwd)"
-        echo "NDK_HOME: $NDK_HOME"
-        
-        # 显示 Makefile
-        if [ -f "Makefile" ]; then
-          echo "=== Makefile 前30行 ==="
-          head -30 Makefile
-          
-          # 检查 Makefile 内容
-          if grep -q "NDK_HOME" Makefile || grep -q "NDK=" Makefile; then
-            echo "Makefile 需要 NDK_HOME 或 NDK 变量"
-            # 尝试设置
-            if [ -n "$NDK_HOME" ]; then
-              echo "设置 NDK_HOME 为: $NDK_HOME"
-              export NDK_HOME
-              export NDK=$NDK_HOME
-            fi
-          fi
+        # 运行项目自带的构建脚本
+        if [ -f "ndk-build.sh" ]; then
+            chmod +x ndk-build.sh
+            ./ndk-build.sh
+        else
+            # 或者直接运行 ndk-build
+            /opt/android-ndk-r21e/ndk-build
         fi
-        
-        # 尝试构建
-        echo "=== 开始构建 ==="
-        make clean && make
     
-    - name: Upload any found files
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
         name: build-output
-        path: "**/!(*.c|*.cpp|*.h|*.hpp|Makefile|*.mk|*.o|*.zip|*.tar.gz)"
+        path: |
+          AndUEDumper/AndUEDumper/libs/
+          AndUEDumper/AndUEDumper/obj/local/*/*.so
         if-no-files-found: warn
