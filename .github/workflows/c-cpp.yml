@@ -1,97 +1,47 @@
-name: Build AndUEDumper Executable
+name: Build AndUEDumper
 
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
-    - name: Setup Android NDK
-      run: |
-        wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
-        unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
-        echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
-        echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
-    
-    - name: Navigate to project directory
-      run: |
-        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
-          cd AndUEDumper-main/AndUEDumper
-        fi
-        echo "Current directory: $(pwd)"
-    
-    - name: Create executable-only Android.mk
-      run: |
-        echo "Creating executable-only Android.mk..."
-        
-        # Backup original file
-        if [ -f "Android.mk" ]; then
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Setup NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+          unzip android-ndk-r21e-linux-x86_64.zip -d /opt/
+          echo "NDK=/opt/android-ndk-r21e" >> $GITHUB_ENV
+      
+      - name: Go to project
+        run: |
+          cd AndUEDumper-main/AndUEDumper || cd AndUEDumper
+          echo "Directory: $(pwd)"
+      
+      - name: Fix Android.mk for executable
+        run: |
+          # Backup
           cp Android.mk Android.mk.backup
-        fi
-        
-        # Create Android.mk that only includes executable.mk
-        cat > Android.mk << 'EOF'
-LOCAL_PATH := $(call my-dir)
-
-include $(CLEAR_VARS)
-
-# Only include executable.mk to build executable
-include $(LOCAL_PATH)/src/executable.mk
-EOF
-        
-        echo "New Android.mk content:"
-        cat Android.mk
-    
-    - name: Build executable
-      run: |
-        echo "Building executable version..."
-        $NDK_HOME/ndk-build clean
-        $NDK_HOME/ndk-build
-    
-    - name: Check for executable files
-      run: |
-        echo "=== Checking for executable files ==="
-        
-        # Look for executable files
-        echo "Searching for UEDump3r or similar executables..."
-        find . -type f -name "UEDump3r" ! -path "./.git/*" | while read f; do
-          echo "Found: $f"
-          file "$f" || true
-        done
-        
-        # Check libs directory
-        if [ -d "libs" ]; then
-          echo ""
-          echo "Contents of libs directory:"
-          find libs -type f | while read f; do
-            echo "  $f"
-          done
-        fi
-        
-        # List all files if no libs directory
-        if [ ! -d "libs" ]; then
-          echo ""
-          echo "All files in current directory:"
-          ls -la
-        fi
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: andue-dumper-build
-        path: |
-          libs/
-          obj/
-        if-no-files-found: warn
-        retention-days: 7
+          
+          # Create new Android.mk
+          echo 'LOCAL_PATH := $(call my-dir)' > Android.mk
+          echo '' >> Android.mk
+          echo 'include $(CLEAR_VARS)' >> Android.mk
+          echo '' >> Android.mk
+          echo 'include $(LOCAL_PATH)/src/executable.mk' >> Android.mk
+      
+      - name: Build
+        run: |
+          /opt/android-ndk-r21e/ndk-build
+      
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: output
+          path: |
+            libs/
+            obj/
+          if-no-files-found: warn
