@@ -16,78 +16,119 @@ jobs:
       with:
         submodules: recursive
     
-    - name: Set up Java
+    - name: Set up Java 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '11'
+        java-version: '17'
     
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+    - name: Install Android SDK tools manually
+      run: |
+        # 创建 Android SDK 目录
+        mkdir -p ~/android-sdk/cmdline-tools
+        
+        # 下载并安装命令行工具
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip -d ~/android-sdk/cmdline-tools/
+        mv ~/android-sdk/cmdline-tools/cmdline-tools ~/android-sdk/cmdline-tools/latest
+        
+        # 设置环境变量
+        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+        
+        # 接受许可
+        yes | sdkmanager --licenses || true
     
     - name: Install Android NDK
       run: |
-        # 安装 Android NDK
-        echo "y" | sudo ${ANDROID_HOME}/tools/bin/sdkmanager "ndk;25.1.8937393"
-        # 设置 NDK_HOME 环境变量
-        echo "NDK_HOME=${ANDROID_HOME}/ndk/25.1.8937393" >> $GITHUB_ENV
-        echo "PATH=${ANDROID_HOME}/ndk/25.1.8937393:$PATH" >> $GITHUB_ENV
+        # 安装 NDK
+        sdkmanager --install "ndk;25.1.8937393"
+        
+        # 设置 NDK_HOME
+        NDK_PATH="$ANDROID_SDK_ROOT/ndk/25.1.8937393"
+        echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+        echo "PATH=$NDK_PATH:$PATH" >> $GITHUB_ENV
+        
+        echo "NDK_HOME: $NDK_HOME"
+        ls -la $NDK_HOME/toolchains/ || echo "工具链目录不存在"
     
-    - name: Install make and other build tools
+    - name: Install build tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y make build-essential
+        sudo apt-get install -y \
+          make \
+          build-essential \
+          clang \
+          git
     
     - name: Navigate to project directory
       run: |
         echo "当前目录:"
         pwd
         ls -la
-        echo "切换到 AndUEDumper/AndUEDumper 目录"
-        cd AndUEDumper/AndUEDumper || cd AndUEDumper
-        echo "当前目录:"
-        pwd
-        ls -la
-    
-    - name: Build the project
-      run: |
-        # 切换到正确的目录
+        
+        # 尝试进入项目目录
         if [ -d "AndUEDumper/AndUEDumper" ]; then
           cd AndUEDumper/AndUEDumper
         elif [ -d "AndUEDumper" ]; then
           cd AndUEDumper
         fi
         
-        echo "当前目录: $(pwd)"
-        echo "NDK_HOME: $NDK_HOME"
-        echo "PATH: $PATH"
-        
-        # 检查 NDK 是否安装成功
-        if [ -z "$NDK_HOME" ]; then
-          echo "错误: NDK_HOME 未设置"
-          exit 1
+        echo "构建目录: $(pwd)"
+        echo "文件列表:"
+        ls -la
+    
+    - name: Show Makefile content
+      run: |
+        # 确保在正确的目录
+        echo "Makefile 内容:"
+        if [ -f "Makefile" ]; then
+          cat Makefile || head -100 Makefile
+        else
+          echo "没有找到 Makefile"
+          find . -name "Makefile" | head -5
         fi
         
-        # 运行 make
+        echo "环境变量:"
+        echo "NDK_HOME=$NDK_HOME"
+        echo "PATH=$PATH"
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+    
+    - name: Build the project
+      run: |
+        # 确保在正确的目录
+        if [ -d "AndUEDumper/AndUEDumper" ]; then
+          cd AndUEDumper/AndUEDumper
+        elif [ -d "AndUEDumper" ]; then
+          cd AndUEDumper
+        fi
+        
+        echo "开始构建..."
+        echo "当前目录: $(pwd)"
+        
+        # 清理并构建
         make clean && make
     
-    - name: List build output
+    - name: Find and list build artifacts
       run: |
-        # 查找构建输出
-        echo "查找构建输出文件..."
-        find . -type f -name "*.so" -o -name "*.a" -o -name "*.o" -o -name "dumper" -o -name "AndUEDumper" | while read file; do
-          echo "找到: $file"
-          file "$file" || true
+        echo "查找构建产物..."
+        find . -type f \( -name "*.so" -o -name "*.a" -o -name "dumper" -o -name "AndUEDumper" -o -perm -111 \) ! -path "./.git/*" | while read file; do
+          if [ -f "$file" ]; then
+            echo "文件: $file"
+            file "$file" || true
+          fi
         done
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: android-build-output
+        name: andue-dumper-build
         path: |
           **/*.so
           **/*.a
           **/dumper
           **/AndUEDumper
+          **/!(*.c|*.cpp|*.h|*.hpp|*.o|Makefile)
         if-no-files-found: warn
         retention-days: 7
