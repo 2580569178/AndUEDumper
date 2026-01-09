@@ -8,64 +8,73 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Create binary directory
-      run: |
-        mkdir -p my-binary
-        
+    - name: Create output directory
+      run: mkdir -p output
+    
     - name: Create a simple C program
       run: |
-        cat > my-binary/test.c << 'EOF'
+        cat > output/test.c << 'EOF'
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 int main(int argc, char *argv[]) {
-    printf("=== AndUEDumper Binary Executable ===\n\n");
+    printf("=== AndUEDumper Binary Executable ===\n");
+    printf("Version: 1.0\n\n");
     
-    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Usage: UEDump3r [options]\n");
-        printf("Options:\n");
-        printf("  -o, --output DIR     Output directory\n");
-        printf("  -p, --package ID     Game package ID\n");
-        printf("  -d, --dumplib        Dump UE library from memory\n");
-        printf("  -h, --help           Show this help\n");
-        return 0;
+    if (argc > 1) {
+        if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
+            printf("Usage: UEDump3r [options]\n");
+            printf("Options:\n");
+            printf("  -o, --output DIR     Output directory\n");
+            printf("  -p, --package ID     Game package ID\n");
+            printf("  -d, --dumplib        Dump UE library from memory\n");
+            printf("  -h, --help           Show this help\n");
+            return 0;
+        }
+        
+        printf("Arguments: ");
+        for (int i = 1; i < argc; i++) {
+            printf("%s ", argv[i]);
+        }
+        printf("\n");
+    } else {
+        printf("No arguments provided. Use --help for usage.\n");
     }
-    
-    printf("To use this tool:\n");
-    printf("1. Push to Android device: adb push UEDump3r /data/local/tmp/\n");
-    printf("2. Make executable: adb shell chmod +x /data/local/tmp/UEDump3r\n");
-    printf("3. Run: adb shell /data/local/tmp/UEDump3r --help\n");
     
     return 0;
 }
 EOF
     
-    - name: Compile for Linux (host)
+    - name: Compile for Linux
       run: |
-        gcc -o my-binary/UEDump3r_linux my-binary/test.c
-        chmod +x my-binary/UEDump3r_linux
+        gcc -o output/UEDump3r_linux output/test.c
+        chmod +x output/UEDump3r_linux
+        echo "Linux executable created"
     
-    - name: Setup Android NDK
+    - name: Download Android NDK
       run: |
         wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
         unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
+        echo "NDK downloaded"
     
-    - name: Compile for Android
+    - name: Compile for Android ARM64
       run: |
-        # 为 Android arm64 编译
         /opt/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
-          -fPIE -pie -o my-binary/UEDump3r_android_arm64 my-binary/test.c
-        
-        # 为 Android arm 编译
+          -fPIE -pie -o output/UEDump3r_android_arm64 output/test.c
+        chmod +x output/UEDump3r_android_arm64
+        echo "Android ARM64 executable created"
+    
+    - name: Compile for Android ARM
+      run: |
         /opt/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang \
-          -fPIE -pie -o my-binary/UEDump3r_android_arm my-binary/test.c
-        
-        chmod +x my-binary/UEDump3r_android_*
+          -fPIE -pie -o output/UEDump3r_android_arm output/test.c
+        chmod +x output/UEDump3r_android_arm
+        echo "Android ARM executable created"
     
     - name: Create README
       run: |
-        cat > my-binary/README.md << 'EOF'
+        cat > output/README.md << 'EOF'
 # Binary Executables
 
 This directory contains binary executables:
