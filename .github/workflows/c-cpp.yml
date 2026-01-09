@@ -1,4 +1,4 @@
-name: Build AndUEDumper Separate
+name: Build AndUEDumper Executable
 
 on:
   push:
@@ -7,7 +7,6 @@ on:
 
 jobs:
   build-executable:
-    name: Build Executable Version
     runs-on: ubuntu-latest
     
     steps:
@@ -19,21 +18,24 @@ jobs:
       run: |
         wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
         unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
-        
         echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
         echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
     
-    - name: Create executable-only Android.mk
+    - name: Navigate to project directory
       run: |
-        # 进入项目目录
         if [ -d "AndUEDumper-main/AndUEDumper" ]; then
           cd AndUEDumper-main/AndUEDumper
         fi
-        
+        echo "当前目录: $(pwd)"
+    
+    - name: Create executable-only Android.mk
+      run: |
         echo "创建只构建可执行文件的 Android.mk..."
         
         # 备份原始文件
-        cp Android.mk Android.mk.backup
+        if [ -f "Android.mk" ]; then
+          cp Android.mk Android.mk.backup
+        fi
         
         # 创建只包含 executable.mk 的 Android.mk
         cat > Android.mk << 'EOF'
@@ -50,153 +52,42 @@ EOF
     
     - name: Build executable
       run: |
-        # 进入项目目录
-        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
-          cd AndUEDumper-main/AndUEDumper
-        fi
-        
         echo "开始构建可执行文件版本..."
         $NDK_HOME/ndk-build clean
-        $NDK_HOME/ndk-build V=1
+        $NDK_HOME/ndk-build
     
-    - name: Check executable files
+    - name: Check build results
       run: |
         echo "=== 检查生成的可执行文件 ==="
         
         # 查找可执行文件
-        find . -type f -name "UEDump3r" ! -path "./.git/*" | while read f; do
+        find . -type f \( -name "UEDump3r" -o -name "AndUEDumper" -o -name "dumper" \) ! -path "./.git/*" | while read f; do
           echo "找到: $f"
           file "$f" || true
         done
         
-        # 如果没有找到，查找其他可能的可执行文件
-        if [ -z "$(find . -type f -name "UEDump3r" ! -path "./.git/*")" ]; then
-          echo "查找所有可执行文件:"
-          find . -type f -executable ! -name "*.so" ! -name "*.sh" ! -name "*.bat" ! -path "./.git/*" | while read f; do
-            echo "  $f"
-            file "$f" || true
-          done
-        fi
-        
         # 检查 libs 目录
         if [ -d "libs" ]; then
+          echo ""
           echo "libs 目录内容:"
-          for arch in libs/*/; do
-            if [ -d "$arch" ]; then
-              echo "  $(basename $arch):"
-              find "$arch" -type f ! -name "*.so" | while read f; do
-                echo "    - $(basename "$f")"
-              done
-            fi
+          find libs -type f | while read f; do
+            echo "  $f"
           done
         fi
+        
+        # 如果没找到，列出所有文件
+        if [ ! -d "libs" ]; then
+          echo ""
+          echo "当前目录文件列表:"
+          ls -la
+        fi
     
-    - name: Upload executable artifacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: andue-dumper-executable-only
+        name: andue-dumper-executable
         path: |
           libs/
           obj/local/
         if-no-files-found: warn
         retention-days: 7
-  
-  build-library:
-    name: Build Library Version
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
-    - name: Setup Android NDK
-      run: |
-        wget -q https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
-        unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
-        
-        echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
-        echo "PATH=/opt/android-ndk-r21e:$PATH" >> $GITHUB_ENV
-    
-    - name: Create library-only Android.mk
-      run: |
-        # 进入项目目录
-        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
-          cd AndUEDumper-main/AndUEDumper
-        fi
-        
-        echo "创建只构建共享库的 Android.mk..."
-        
-        # 创建只包含 library.mk 的 Android.mk
-        cat > Android.mk << 'EOF'
-LOCAL_PATH := $(call my-dir)
-
-include $(CLEAR_VARS)
-
-# 只包含 library.mk 来构建共享库
-include $(LOCAL_PATH)/src/library.mk
-EOF
-        
-        echo "新的 Android.mk 内容:"
-        cat Android.mk
-    
-    - name: Build library
-      run: |
-        # 进入项目目录
-        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
-          cd AndUEDumper-main/AndUEDumper
-        fi
-        
-        echo "开始构建共享库版本..."
-        $NDK_HOME/ndk-build clean
-        $NDK_HOME/ndk-build
-    
-    - name: Upload library artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: andue-dumper-library-only
-        path: |
-          libs/
-          obj/local/
-        if-no-files-found: warn
-        retention-days: 7
-  
-  analyze:
-    name: Analyze Build Configuration
-    runs-on: ubuntu-latest
-    needs: [build-executable, build-library]
-    
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
-    - name: Check executable.mk and library.mk
-      run: |
-        # 进入项目目录
-        if [ -d "AndUEDumper-main/AndUEDumper" ]; then
-          cd AndUEDumper-main/AndUEDumper
-        fi
-        
-        echo "=== 分析 executable.mk ==="
-        if [ -f "src/executable.mk" ]; then
-          cat src/executable.mk
-        else
-          echo "错误: 找不到 executable.mk"
-        fi
-        
-        echo ""
-        echo "=== 分析 library.mk ==="
-        if [ -f "src/library.mk" ]; then
-          cat src/library.mk
-        else
-          echo "错误: 找不到 library.mk"
-        fi
-        
-        echo ""
-        echo "=== 原始 Android.mk ==="
-        if [ -f "Android.mk.backup" ]; then
-          cat Android.mk.backup
-        else
-          cat Android.mk
-        fi
