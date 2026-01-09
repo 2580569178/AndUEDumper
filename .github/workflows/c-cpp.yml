@@ -7,128 +7,190 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
     
-    - name: Set up Java 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-    
-    - name: Install Android SDK tools manually
+    - name: Download Android NDK r21e (稳定版本)
       run: |
-        # 创建 Android SDK 目录
-        mkdir -p ~/android-sdk/cmdline-tools
+        # 使用 r21e 版本，这是一个稳定的 NDK 版本
+        wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+        unzip -q android-ndk-r21e-linux-x86_64.zip -d /opt/
         
-        # 下载并安装命令行工具
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip -d ~/android-sdk/cmdline-tools/
-        mv ~/android-sdk/cmdline-tools/cmdline-tools ~/android-sdk/cmdline-tools/latest
+        echo "NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
+        echo "PATH=/opt/android-ndk-r21e:/opt/android-ndk-r21e/build:$PATH" >> $GITHUB_ENV
         
-        # 设置环境变量
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
-        
-        # 接受许可
-        yes | sdkmanager --licenses || true
+        # 检查 ndk-build 是否存在
+        echo "检查 ndk-build:"
+        ls -la /opt/android-ndk-r21e/ndk-build || echo "ndk-build 不在根目录"
+        find /opt/android-ndk-r21e -name "ndk-build" -type f | head -5
     
-    - name: Install Android NDK
-      run: |
-        # 安装 NDK
-        sdkmanager --install "ndk;25.1.8937393"
-        
-        # 设置 NDK_HOME
-        NDK_PATH="$ANDROID_SDK_ROOT/ndk/25.1.8937393"
-        echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
-        echo "PATH=$NDK_PATH:$PATH" >> $GITHUB_ENV
-        
-        echo "NDK_HOME: $NDK_HOME"
-        ls -la $NDK_HOME/toolchains/ || echo "工具链目录不存在"
-    
-    - name: Install build tools
+    - name: Install required tools
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           make \
           build-essential \
           clang \
-          git
+          gcc \
+          g++ \
+          file
     
-    - name: Navigate to project directory
+    - name: Check project structure
       run: |
-        echo "当前目录:"
-        pwd
-        ls -la
+        echo "=== 项目结构 ==="
+        find . -name "Makefile" -o -name "*.mk" -o -name "Android.mk" -o -name "Application.mk" | head -10
         
-        # 尝试进入项目目录
-        if [ -d "AndUEDumper/AndUEDumper" ]; then
-          cd AndUEDumper/AndUEDumper
-        elif [ -d "AndUEDumper" ]; then
-          cd AndUEDumper
+        echo "=== AndUEDumper 目录内容 ==="
+        if [ -d "AndUEDumper" ]; then
+          ls -la AndUEDumper/
+          if [ -d "AndUEDumper/AndUEDumper" ]; then
+            echo "=== AndUEDumper/AndUEDumper 目录 ==="
+            ls -la AndUEDumper/AndUEDumper/
+          fi
         fi
-        
-        echo "构建目录: $(pwd)"
-        echo "文件列表:"
-        ls -la
     
     - name: Show Makefile content
       run: |
-        # 确保在正确的目录
-        echo "Makefile 内容:"
-        if [ -f "Makefile" ]; then
-          cat Makefile || head -100 Makefile
-        else
-          echo "没有找到 Makefile"
-          find . -name "Makefile" | head -5
-        fi
-        
-        echo "环境变量:"
-        echo "NDK_HOME=$NDK_HOME"
-        echo "PATH=$PATH"
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-    
-    - name: Build the project
-      run: |
-        # 确保在正确的目录
-        if [ -d "AndUEDumper/AndUEDumper" ]; then
+        # 找到 Makefile
+        if [ -f "AndUEDumper/AndUEDumper/Makefile" ]; then
           cd AndUEDumper/AndUEDumper
-        elif [ -d "AndUEDumper" ]; then
+        elif [ -f "AndUEDumper/Makefile" ]; then
           cd AndUEDumper
         fi
         
-        echo "开始构建..."
         echo "当前目录: $(pwd)"
+        echo "=== Makefile 内容 ==="
+        if [ -f "Makefile" ]; then
+          cat Makefile
+        else
+          echo "未找到 Makefile"
+          find . -name "Makefile" | head -5
+        fi
         
-        # 清理并构建
-        make clean && make
+        echo "=== 环境变量 ==="
+        echo "NDK_HOME: $NDK_HOME"
+        echo "PATH: $PATH"
+        which make
+        which clang
     
-    - name: Find and list build artifacts
+    - name: Fix Makefile if needed
       run: |
-        echo "查找构建产物..."
-        find . -type f \( -name "*.so" -o -name "*.a" -o -name "dumper" -o -name "AndUEDumper" -o -perm -111 \) ! -path "./.git/*" | while read file; do
+        # 如果在项目目录中
+        if [ -f "AndUEDumper/AndUEDumper/Makefile" ]; then
+          cd AndUEDumper/AndUEDumper
+        elif [ -f "AndUEDumper/Makefile" ]; then
+          cd AndUEDumper
+        fi
+        
+        if [ -f "Makefile" ]; then
+          echo "原始 Makefile 内容:"
+          head -20 Makefile
+          
+          # 备份原始 Makefile
+          cp Makefile Makefile.backup
+          
+          # 检查并修复 ndk-build 路径
+          if grep -q "ndk-build" Makefile; then
+            echo "检测到 Makefile 使用 ndk-build"
+            # 查找正确的 ndk-build 路径
+            NDK_BUILD_PATH=$(find /opt/android-ndk-r21e -name "ndk-build" -type f | head -1)
+            if [ -n "$NDK_BUILD_PATH" ]; then
+              echo "找到 ndk-build: $NDK_BUILD_PATH"
+              # 替换 Makefile 中的 ndk-build 调用
+              sed -i "s|ndk-build|$NDK_BUILD_PATH|g" Makefile
+              echo "已更新 Makefile 中的 ndk-build 路径"
+            else
+              echo "错误: 未找到 ndk-build 脚本"
+              # 尝试直接使用 NDK_HOME
+              echo "尝试设置 NDK_HOME 环境变量"
+              echo "export NDK_HOME=/opt/android-ndk-r21e" >> $GITHUB_ENV
+            fi
+          fi
+          
+          echo "修复后的 Makefile 内容:"
+          head -20 Makefile
+        fi
+    
+    - name: Try to build with direct NDK path
+      run: |
+        # 确保在项目目录
+        if [ -f "AndUEDumper/AndUEDumper/Makefile" ]; then
+          cd AndUEDumper/AndUEDumper
+        elif [ -f "AndUEDumper/Makefile" ]; then
+          cd AndUEDumper
+        fi
+        
+        echo "当前目录: $(pwd)"
+        echo "尝试构建..."
+        
+        # 方法1: 直接设置 NDK 环境变量然后 make
+        export NDK=/opt/android-ndk-r21e
+        export NDK_HOME=/opt/android-ndk-r21e
+        export PATH=$NDK:$PATH
+        
+        # 查找 ndk-build 的实际位置
+        NDK_BUILD=$(find /opt/android-ndk-r21e -name "ndk-build" -type f | head -1)
+        if [ -n "$NDK_BUILD" ]; then
+          echo "使用 ndk-build: $NDK_BUILD"
+          
+          # 方法2: 直接调用 ndk-build
+          $NDK_BUILD clean
+          $NDK_BUILD
+        else
+          echo "错误: 未找到 ndk-build"
+          
+          # 方法3: 尝试直接 make，看看是否会调用其他构建系统
+          make clean || echo "make clean 失败"
+          make || {
+            echo "make 失败，尝试直接编译..."
+            # 尝试查找并编译源文件
+            find . -name "*.c" -o -name "*.cpp" | head -3 | while read src; do
+              echo "编译: $src"
+              if [[ $src == *.c ]]; then
+                gcc "$src" -o "${src%.c}.out" -lm
+              elif [[ $src == *.cpp ]]; then
+                g++ "$src" -o "${src%.cpp}.out"
+              fi
+            done
+          }
+        fi
+    
+    - name: Find build outputs
+      run: |
+        echo "=== 查找构建产物 ==="
+        find . -type f \( -name "*.so" -o -name "*.a" -o -name "dumper" -o -name "AndUEDumper" -o -name "*.out" -o -perm -111 \) ! -path "./.git/*" | while read file; do
           if [ -f "$file" ]; then
             echo "文件: $file"
             file "$file" || true
+            echo "大小: $(stat -c%s "$file") 字节"
+            echo "---"
+          fi
+        done
+        
+        echo "=== 检查常见目录 ==="
+        for dir in libs obj lib build out; do
+          if [ -d "$dir" ]; then
+            echo "目录 $dir 内容:"
+            find "$dir" -type f | head -10
           fi
         done
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: andue-dumper-build
+        name: andue-dumper
         path: |
           **/*.so
           **/*.a
           **/dumper
           **/AndUEDumper
-          **/!(*.c|*.cpp|*.h|*.hpp|*.o|Makefile)
+          **/*.out
+          **/libs/
+          **/obj/
         if-no-files-found: warn
         retention-days: 7
