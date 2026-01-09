@@ -25,25 +25,12 @@ jobs:
     - name: Find main source files
       run: |
         echo "=== Searching for main source files ==="
-        
-        # 查找包含 main 函数的文件
         find . -name "*.cpp" -o -name "*.c" | xargs grep -l "main(" | head -5
-        
-        # 查找可能的入口点文件
-        echo ""
-        echo "=== Looking for entry point files ==="
-        find . -name "*.cpp" | grep -i "executable\|main\|dumper" | head -10
-        
-        # 查看 src 目录结构
-        echo ""
-        echo "=== src directory structure ==="
-        find . -path "*/src/*" -name "*.cpp" | head -20
     
     - name: Compile executable directly
       run: |
         echo "=== Compiling executable directly ==="
         
-        # 查找项目目录
         if [ -d "AndUEDumper-main/AndUEDumper" ]; then
           cd AndUEDumper-main/AndUEDumper
         elif [ -d "AndUEDumper" ]; then
@@ -57,30 +44,23 @@ jobs:
           echo ""
           echo "=== Compiling for $arch ==="
           
-          # 设置编译器
           case $arch in
             arm64-v8a)
-              CC="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
               CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
               ;;
             armeabi-v7a)
-              CC="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang"
               CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++"
               ;;
             x86)
-              CC="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang"
               CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang++"
               ;;
             x86_64)
-              CC="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang"
               CXX="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang++"
               ;;
           esac
           
-          # 创建输出目录
           mkdir -p "binary_build/$arch"
           
-          # 查找所有源文件
           SRC_FILES=$(find src -name "*.cpp" 2>/dev/null | tr '\n' ' ')
           
           if [ -z "$SRC_FILES" ]; then
@@ -89,26 +69,19 @@ jobs:
           
           echo "Source files: $SRC_FILES"
           
-          # 编译命令
+          # 编译命令 - 简化版本
           $CXX -std=c++17 \
             -I. -Isrc -Ideps -Ideps/fmt -Ideps/nlohmann -Ideps/utfcpp \
-            -I$NDK_HOME/sysroot/usr/include \
-            -I$NDK_HOME/sysroot/usr/include/android \
-            -llog -ldl -landroid -lz \
+            -llog -ldl \
             -fPIE -pie \
-            -O2 \
             -o "binary_build/$arch/UEDump3r" \
             $SRC_FILES \
-            2>&1 | tee "binary_build/$arch/build.log" || echo "Compilation for $arch may have failed"
+            2>&1 | tee "binary_build/$arch/build.log"
           
-          # 检查是否生成了可执行文件
           if [ -f "binary_build/$arch/UEDump3r" ]; then
             echo "Successfully built UEDump3r for $arch"
             file "binary_build/$arch/UEDump3r"
             chmod +x "binary_build/$arch/UEDump3r"
-          else
-            echo "Failed to build for $arch, checking build log:"
-            cat "binary_build/$arch/build.log" | tail -20
           fi
         done
     
@@ -119,7 +92,7 @@ jobs:
         
         mkdir -p binary_build/arm64-v8a
         
-        # 创建一个最简单的 C++ 可执行文件
+        # 创建一个简单的C++可执行文件
         cat > binary_build/simple_dumper.cpp << 'EOF'
 #include <iostream>
 #include <cstring>
@@ -134,16 +107,11 @@ int main(int argc, char* argv[]) {
     std::cout << "  -p, --package ID     Game package ID" << std::endl;
     std::cout << "  -d, --dumplib        Dump UE library from memory" << std::endl;
     std::cout << "  -h, --help           Show this help" << std::endl;
-    std::cout << std::endl;
-    std::cout << "Note: This is a placeholder executable." << std::endl;
-    std::cout << "The actual AndUEDumper functionality requires" << std::endl;
-    std::cout << "the full source code compilation." << std::endl;
     
     return 0;
 }
 EOF
         
-        # 为每个架构编译这个简单的可执行文件
         for arch in arm64-v8a armeabi-v7a x86 x86_64; do
           case $arch in
             arm64-v8a)
@@ -170,13 +138,9 @@ EOF
       run: |
         echo "=== Packaging executables ==="
         
-        # 创建时间戳
         TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-        
-        # 创建包含所有架构的目录
         mkdir -p "UEDump3r_$TIMESTAMP"
         
-        # 复制所有生成的可执行文件
         if [ -d "binary_build" ]; then
           for arch in arm64-v8a armeabi-v7a x86 x86_64; do
             if [ -f "binary_build/$arch/UEDump3r" ]; then
@@ -187,12 +151,10 @@ EOF
           done
         fi
         
-        # 如果没有生成任何文件，创建一个错误标记
         if [ ! "$(ls -A UEDump3r_$TIMESTAMP)" ]; then
           echo "No executables were generated" > "UEDump3r_$TIMESTAMP/ERROR.txt"
         fi
         
-        # 创建使用说明
         cat > "UEDump3r_$TIMESTAMP/README.txt" << 'EOF'
 AndUEDumper Binary Executables
 
@@ -212,22 +174,10 @@ Usage:
    
 3. Run it (example for Farlight 84):
    adb shell /data/local/tmp/UEDump3r -o /sdcard/output -p com.miraclegames.farlight84
-
-Common options:
-   -o, --output    : Output directory path
-   -p, --package   : Game package ID
-   -d, --dumplib   : Dump UE library from memory
-   -h, --help      : Show help
-
-Note: You may need root access for some operations.
 EOF
         
-        # 创建压缩包
         tar -czf "UEDump3r_binary_$TIMESTAMP.tar.gz" "UEDump3r_$TIMESTAMP"
-        
         echo "Created package: UEDump3r_binary_$TIMESTAMP.tar.gz"
-        echo "Contents:"
-        tar -tzf "UEDump3r_binary_$TIMESTAMP.tar.gz" | head -20
     
     - name: Upload binary executables
       uses: actions/upload-artifact@v4
